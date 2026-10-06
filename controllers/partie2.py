@@ -1,9 +1,8 @@
 import cv2
 from models.similarite import trouver_meilleur_match
 from models.detection_zones import (isoler_regions, nettoyer_masque, extraire_boites,
-                                    fusionner_boites, est_nette, touche_le_bord)
-from views.affichage import dessiner_resultats_multiples
-from controllers.partie1 import redimensionner_si_necessaire
+                                    fusionner_boites, est_nette, touche_le_bord, intersection)
+from views.fenetre import FenetreImage
 
 
 # un panneau coupé par le bord de l'image est peu fiable : on est plus exigeant
@@ -58,7 +57,12 @@ class DetectionAuto:
 
             resultats.append((boite, nom, score))
 
-        # 5. si le même template sort plusieurs fois, on garde seulement les
+        # 5. deux résultats qui se superposent = le même panneau vu deux fois
+        #    (ex: un gros morceau de fond et le vrai panneau dedans).
+        #    On garde celui qui a le meilleur score.
+        resultats = self._garder_meilleurs(resultats)
+
+        # 6. si le même template sort plusieurs fois, on garde seulement les
         #    détections presque aussi bonnes que la meilleure (au moins 50%).
         #    Comme ça deux vrais panneaux identiques restent, mais les
         #    fragments d'un autre panneau qui ressemblent un peu sont enlevés.
@@ -67,6 +71,20 @@ class DetectionAuto:
             meilleur_par_nom[nom] = max(score, meilleur_par_nom.get(nom, 0))
 
         return [r for r in resultats if r[2] >= 0.5 * meilleur_par_nom[r[1]]]
+
+    def _garder_meilleurs(self, resultats):
+        """Parmi les résultats qui se superposent beaucoup, garde le meilleur score."""
+        gardes = []
+        for rect, nom, score in sorted(resultats, key=lambda r: r[2], reverse=True):
+            doublon = False
+            for rect2, _, _ in gardes:
+                plus_petite = min(rect[2] * rect[3], rect2[2] * rect2[3])
+                if intersection(rect, rect2) / plus_petite > 0.5:
+                    doublon = True
+                    break
+            if not doublon:
+                gardes.append((rect, nom, score))
+        return gardes
 
     def lancer(self):
         """Lance la détection auto sur l'image courante et affiche le résultat."""
@@ -88,25 +106,17 @@ class DetectionAuto:
             print(f"  -> {nom} (score: {score:.2f}) en {rect}")
         print(f"\n{len(resultats)} panneau(x) trouvé(s). Echap ou bouton X pour quitter")
 
-        # on dessine sur une copie, puis on resize pour que ça rentre à l'écran
-        image_resultat = dessiner_resultats_multiples(image.copy(), resultats)
-        image_resultat, _ = redimensionner_si_necessaire(image_resultat)
-
-        nom_fenetre = "Partie 2 - Detection automatique (Echap pour quitter)"
-        cv2.namedWindow(nom_fenetre, cv2.WINDOW_AUTOSIZE)
+        titre = "Partie 2 - Detection automatique (Echap: quitter | F: plein ecran)"
+        fenetre = FenetreImage(titre, image)
+        for rect, nom, score in resultats:
+            fenetre.ajouter_annotation(rect, f"{nom} ({score:.2f})")
+        fenetre.ouvrir()
 
         while True:
-            cv2.imshow(nom_fenetre, image_resultat)
-            key = cv2.waitKey(30) & 0xFF
+            fenetre.afficher()
+            touche = fenetre.lire_touche()
 
-            # fenêtre fermée avec le bouton X
-            try:
-                if cv2.getWindowProperty(nom_fenetre, cv2.WND_PROP_VISIBLE) < 1:
-                    break
-            except cv2.error:
+            if touche == 27 or not fenetre.est_ouverte():  # echap ou bouton X
                 break
 
-            if key == 27:  # echap
-                break
-
-        cv2.destroyAllWindows()
+        fenetre.fermer()
