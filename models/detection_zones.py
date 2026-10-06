@@ -8,6 +8,7 @@ AIRE_MAX = 0.30       # et au plus 30%
 RATIO_MIN = 0.4       # largeur / hauteur
 RATIO_MAX = 2.5
 REMPLISSAGE_MIN = 0.35  # aire du contour / aire de la boite (vire les taches fines)
+NETTETE_MIN = 150     # en dessous, la zone est floue (fond ou objet hors focus)
 
 
 def isoler_regions(image):
@@ -122,3 +123,21 @@ def fusionner_boites(boites, seuil=0.5):
                 break
 
     return boites
+
+
+def est_nette(roi):
+    """
+    Un panneau a des bords nets, alors qu'un objet flou (voiture, fond
+    hors focus) n'en a presque pas. On mesure la variance du Laplacien
+    (filtre passe-haut vu en cours) sur la zone mise à 100x100 pour que
+    la mesure ne dépende pas de la taille de la boite.
+    """
+    gris = cv2.cvtColor(cv2.resize(roi, (100, 100)), cv2.COLOR_BGR2GRAY)
+    return cv2.Laplacian(gris, cv2.CV_64F).var() >= NETTETE_MIN
+
+
+def touche_le_bord(boite, image):
+    """True si la boite touche le bord de l'image (panneau probablement coupé)."""
+    x, y, w, h = boite
+    hauteur, largeur = image.shape[:2]
+    return x <= 2 or y <= 2 or x + w >= largeur - 2 or y + h >= hauteur - 2

@@ -1,9 +1,13 @@
 import cv2
 from models.similarite import trouver_meilleur_match
-from models.detection_zones import (isoler_regions, nettoyer_masque,
-                                    extraire_boites, fusionner_boites)
+from models.detection_zones import (isoler_regions, nettoyer_masque, extraire_boites,
+                                    fusionner_boites, est_nette, touche_le_bord)
 from views.affichage import dessiner_resultats_multiples
 from controllers.partie1 import redimensionner_si_necessaire
+
+
+# un panneau coupé par le bord de l'image est peu fiable : on est plus exigeant
+SCORE_MIN_BORD = 0.5
 
 
 class DetectionAuto:
@@ -34,13 +38,25 @@ class DetectionAuto:
 
         # 4. on compare chaque zone aux templates avec l'algo de la partie 1
         resultats = []
-        for (x, y, w, h) in boites:
+        for boite in boites:
+            x, y, w, h = boite
             roi = image[y:y+h, x:x+w]
+
+            # zone floue (voiture, fond hors focus) -> pas un panneau
+            if not est_nette(roi):
+                continue
+
             nom, score = trouver_meilleur_match(roi, self.chargeur.templates)
 
-            # sous le seuil -> ce n'est pas un panneau connu (voiture, route...)
-            if nom is not None:
-                resultats.append(((x, y, w, h), nom, score))
+            # sous le seuil -> ce n'est pas un panneau connu
+            if nom is None:
+                continue
+
+            # panneau coupé par le bord de l'image : il faut un meilleur score
+            if touche_le_bord(boite, image) and score < SCORE_MIN_BORD:
+                continue
+
+            resultats.append((boite, nom, score))
 
         # 5. si le même template sort plusieurs fois, on garde seulement les
         #    détections presque aussi bonnes que la meilleure (au moins 50%).
