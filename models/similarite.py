@@ -15,18 +15,35 @@ def calculer_similarite(roi, template):
     """
     
     # --- 1) SCORE ORB (très robuste pour le texte) ---
+    # on met le roi et le template à la même taille pour que les points
+    # clés soient comparables, sinon un grand roi donne plein de faux matchs.
+    # On garde les proportions du template (sinon "DO NOT PASS" est déformé)
+    echelle = 200 / max(template.shape[:2])
+    taille = (int(template.shape[1] * echelle), int(template.shape[0] * echelle))
+    roi_gris = cv2.cvtColor(cv2.resize(roi, taille), cv2.COLOR_BGR2GRAY)
+    tmpl_gris = cv2.cvtColor(cv2.resize(template, taille), cv2.COLOR_BGR2GRAY)
+
     orb = cv2.ORB_create(500)
-    kp_roi, des_roi = orb.detectAndCompute(roi, None)
-    kp_tmpl, des_tmpl = orb.detectAndCompute(template, None)
-    
+    kp_roi, des_roi = orb.detectAndCompute(roi_gris, None)
+    kp_tmpl, des_tmpl = orb.detectAndCompute(tmpl_gris, None)
+
     score_orb = 0.0
-    if des_roi is not None and des_tmpl is not None:
-        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
-        matches = bf.match(des_roi, des_tmpl)
-        # on ne garde que les matchs très sûrs (faible distance)
-        good_matches = [m for m in matches if m.distance < 50]
-        # On plafonne le score à 1.0 (12 bons matchs = score parfait)
-        score_orb = min(1.0, len(good_matches) / 12.0)
+    if des_roi is not None and des_tmpl is not None and len(des_tmpl) >= 2:
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING)
+        paires = bf.knnMatch(des_roi, des_tmpl, k=2)
+        # sens inverse : pour chaque point du template, quel est le meilleur point du roi ?
+        retour = bf.match(des_tmpl, des_roi)
+
+        # un match est bon si :
+        #  - test du ratio (Lowe) : le meilleur match est nettement meilleur que le 2e
+        #  - il est mutuel : le template choisit aussi ce même point du roi
+        bons = 0
+        for i, p in enumerate(paires):
+            if len(p) < 2:
+                continue
+            if p[0].distance < 0.75 * p[1].distance and retour[p[0].trainIdx].trainIdx == i:
+                bons += 1
+        score_orb = min(1.0, bons / 20.0)
 
     # --- 2) SCORE CLASSIQUE (Histogramme HSV + Canny + Pixel direct) ---
     # resize le roi à la taille du template
