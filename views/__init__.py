@@ -1,2 +1,3 @@
-from .affichage import dessiner_resultat, dessiner_resultats_multiples, generer_couleur
+from .affichage import dessiner_resultats, generer_couleur
+from .fenetre import FenetreImage
 from .interface import InterfacePrincipale

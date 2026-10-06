@@ -8,6 +8,7 @@ AIRE_MAX = 0.30       # et au plus 30%
 RATIO_MIN = 0.4       # largeur / hauteur
 RATIO_MAX = 2.5
 REMPLISSAGE_MIN = 0.35  # aire du contour / aire de la boite (vire les taches fines)
+NETTETE_MIN = 150     # en dessous, la zone est floue (fond ou objet hors focus)
 
 
 def isoler_regions(image):
@@ -32,7 +33,7 @@ def isoler_regions(image):
     bleu = cv2.inRange(hsv, (100, 130, 70), (130, 255, 255))
 
     # blanc : peu de couleur et très clair
-    blanc = cv2.inRange(hsv, (0, 0, 215), (180, 48, 255))
+    blanc = cv2.inRange(hsv, (0, 0, 200), (180, 48, 255))
 
     return [rouge, orange, jaune, bleu, blanc]
 
@@ -81,7 +82,7 @@ def extraire_boites(masque):
     return boites
 
 
-def _intersection(a, b):
+def intersection(a, b):
     """Aire de l'intersection entre deux boites (x, y, w, h)."""
     x1 = max(a[0], b[0])
     y1 = max(a[1], b[1])
@@ -92,11 +93,14 @@ def _intersection(a, b):
     return (x2 - x1) * (y2 - y1)
 
 
-def fusionner_boites(boites, seuil=0.5):
+def fusionner_boites(boites, seuil=0.5, ecart_taille_max=3):
     """
     Enlève les doublons : si deux boites se chevauchent beaucoup
     (intersection / aire de la plus petite > seuil), on les fusionne
     en une seule boite qui contient les deux.
+    On fusionne seulement des boites de taille comparable (ex: la bordure
+    rouge et l'intérieur blanc d'un même panneau). Sinon une grande tache
+    claire du fond qui contient un panneau l'avalerait en entier.
     On répète tant qu'il reste des fusions possibles.
     """
     boites = list(boites)
@@ -108,8 +112,12 @@ def fusionner_boites(boites, seuil=0.5):
             for j in range(i + 1, len(boites)):
                 a, b = boites[i], boites[j]
                 plus_petite = min(a[2] * a[3], b[2] * b[3])
+                plus_grande = max(a[2] * a[3], b[2] * b[3])
 
-                if _intersection(a, b) / plus_petite > seuil:
+                if plus_grande / plus_petite > ecart_taille_max:
+                    continue
+
+                if intersection(a, b) / plus_petite > seuil:
                     x = min(a[0], b[0])
                     y = min(a[1], b[1])
                     x2 = max(a[0] + a[2], b[0] + b[2])
@@ -122,3 +130,21 @@ def fusionner_boites(boites, seuil=0.5):
                 break
 
     return boites
+
+
+def est_nette(roi):
+    """
+    Un panneau a des bords nets, alors qu'un objet flou (voiture, fond
+    hors focus) n'en a presque pas. On mesure la variance du Laplacien
+    (filtre passe-haut vu en cours) sur la zone mise à 100x100 pour que
+    la mesure ne dépende pas de la taille de la boite.
+    """
+    gris = cv2.cvtColor(cv2.resize(roi, (100, 100)), cv2.COLOR_BGR2GRAY)
+    return cv2.Laplacian(gris, cv2.CV_64F).var() >= NETTETE_MIN
+
+
+def touche_le_bord(boite, image):
+    """True si la boite touche le bord de l'image (panneau probablement coupé)."""
+    x, y, w, h = boite
+    hauteur, largeur = image.shape[:2]
+    return x <= 2 or y <= 2 or x + w >= largeur - 2 or y + h >= hauteur - 2
