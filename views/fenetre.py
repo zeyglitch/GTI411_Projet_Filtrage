@@ -8,13 +8,10 @@ FOND = (40, 40, 40)   # couleur des bandes autour de l'image
 
 class FenetreImage:
     """
-    Fenêtre OpenCV redimensionnable qui affiche une image avec ses annotations.
-    - l'image est mise à l'échelle pour remplir la fenêtre en gardant ses
-      proportions et elle est centrée (bandes sombres sur les côtés)
-    - les cadres et textes sont dessinés à la taille de la fenêtre, donc
-      ils restent nets et lisibles même en plein écran
-    - les coordonnées de la souris sont reconverties en pixels de l'image
-    Touches : F = plein écran, C = effacer les annotations.
+    Fenêtre OpenCV qui affiche une image et ses annotations.
+    On redimensionne proprement (garde les proportions),
+    on convertit les coords souris en pixels réels de l'image.
+    F = plein écran, C = effacer les cadres.
     """
 
     def __init__(self, titre, image, callback_souris=None, largeur_max=1280, hauteur_max=800):
@@ -78,10 +75,7 @@ class FenetreImage:
         return self.taille
 
     def construire(self, largeur, hauteur):
-        """
-        Crée l'image à afficher pour une fenêtre largeur x hauteur :
-        fond sombre, image centrée et mise à l'échelle, puis annotations.
-        """
+        # fond sombre + image centrée à la bonne taille + annotations par-dessus
         ih, iw = self.image.shape[:2]
         echelle = min(largeur / iw, hauteur / ih)
         nw = max(1, int(iw * echelle))

@@ -3,169 +3,174 @@ import numpy as np
 
 
 # en dessous de ce score on considère qu'on n'a rien trouvé (panneau inconnu)
-SEUIL_DETECTION = 0.30
+SEUIL_DETECTION = 0.33
 
-# taille (en pixels) du plus grand côté pour comparer les images
-TAILLE_ORB = 200
-TAILLE_GLISSANT = 120
+# largeur de référence pour comparer les images à la même échelle
+TAILLE_BASE = 100
+
+# petit cache pour ne pas recalculer les gradients et les couleurs des templates à chaque fois
+cache_templates = {}
 
 
 def signature_couleur(image):
     """
-    Pourcentage de pixels de chaque "classe de couleur" dans l'image :
+    Pourcentage de pixels de chaque couleur dans l'image.
+    On travaille en HSV pour que l'éclairage ne fausse pas les couleurs :
     rouge, orange, jaune, vert, bleu, noir, blanc/gris.
-    On travaille en HSV (la teinte ne dépend presque pas de la lumière).
-    Retourne un tableau de 7 valeurs qui additionnent 1.
     """
+    # flou léger pour éviter que le bruit du capteur fausse la couleur d'un pixel
     flou = cv2.GaussianBlur(image, (5, 5), 0)
     hsv = cv2.cvtColor(flou, cv2.COLOR_BGR2HSV)
     h = hsv[:, :, 0].astype(int)
     s = hsv[:, :, 1]
     v = hsv[:, :, 2]
 
+    # on isole les pixels qui ont une vraie couleur (assez saturés et assez clairs)
     colore = (s > 90) & (v > 70)
 
     classes = [
-        colore & ((h < 8) | (h >= 165)),    # rouge
+        colore & ((h < 8) | (h >= 165)),    # rouge (fait le tour à 180 dans opencv)
         colore & (h >= 8) & (h < 20),       # orange
         colore & (h >= 20) & (h < 35),      # jaune
         colore & (h >= 35) & (h < 85),      # vert
         colore & (h >= 85) & (h < 135),     # bleu
         (~colore) & (v < 90),               # noir
-        (~colore) & (v >= 90),              # blanc / gris
+        (~colore) & (v >= 90),              # blanc / gris clair
     ]
-    return np.array([c.mean() for c in classes])
+    return np.array([float(c.mean()) for c in classes])
 
 
-def compter_matchs_orb(roi, template):
+def gradient_sobel(image):
     """
-    Compte les points ORB du roi qui retrouvent leur place dans le template.
-    ORB repère des coins (lettres, flèches...) et ne dépend pas de l'échelle.
-    Un match compte seulement s'il passe 3 tests :
-      1. test du ratio : le meilleur match est nettement meilleur que le 2e
-      2. il est mutuel : le template choisit aussi ce point du roi
-      3. cohérence géométrique (RANSAC) : tous les matchs doivent suivre la
-         même transformation (décalage + rotation + échelle). Les matchs
-         au hasard entre deux textes différents ne la respectent pas.
-    Retourne le nombre de matchs cohérents (inliers).
+    Calcule l'amplitude du gradient avec le filtre de Sobel.
+    Ça permet de faire ressortir les formes géométriques, les flèches,
+    les lettres et les chiffres, peu importe si la photo est sombre ou claire.
     """
-    # même taille pour les deux, en gardant les proportions du template
-    echelle = TAILLE_ORB / max(template.shape[:2])
-    taille = (int(template.shape[1] * echelle), int(template.shape[0] * echelle))
-    roi_gris = cv2.cvtColor(cv2.resize(roi, taille), cv2.COLOR_BGR2GRAY)
-    tmpl_gris = cv2.cvtColor(cv2.resize(template, taille), cv2.COLOR_BGR2GRAY)
-
-    # bord et patch plus petits que par défaut (31) : sinon ORB ne trouve presque
-    # rien dans les petites zones (le bord de 31 pixels est ignoré)
-    orb = cv2.ORB_create(500, edgeThreshold=15, patchSize=15)
-    kp_roi, des_roi = orb.detectAndCompute(roi_gris, None)
-    kp_tmpl, des_tmpl = orb.detectAndCompute(tmpl_gris, None)
-
-    if des_roi is None or des_tmpl is None or len(des_tmpl) < 2:
-        return 0
-
-    bf = cv2.BFMatcher(cv2.NORM_HAMMING)
-    paires = bf.knnMatch(des_roi, des_tmpl, k=2)
-    retour = bf.match(des_tmpl, des_roi)
-
-    pts_roi = []
-    pts_tmpl = []
-    for i, p in enumerate(paires):
-        if len(p) < 2:
-            continue
-        if p[0].distance < 0.75 * p[1].distance and retour[p[0].trainIdx].trainIdx == i:
-            pts_roi.append(kp_roi[i].pt)
-            pts_tmpl.append(kp_tmpl[p[0].trainIdx].pt)
-
-    # il faut au moins 4 points pour estimer la transformation
-    if len(pts_roi) < 4:
-        return 0
-
-    _, masque = cv2.estimateAffinePartial2D(np.float32(pts_roi), np.float32(pts_tmpl),
-                                            method=cv2.RANSAC, ransacReprojThreshold=4)
-    if masque is None:
-        return 0
-    return int(masque.sum())
+    gris = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gx = cv2.Sobel(gris, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(gris, cv2.CV_32F, 0, 1, ksize=3)
+    # norme du vecteur gradient : sqrt(gx^2 + gy^2)
+    mag = np.sqrt(gx**2 + gy**2)
+    return cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
 
-def correlation_glissante(roi, template):
+def preparer_template(template):
+    """Prépare et garde en mémoire les versions lissées et Sobel d'un template."""
+    cle = id(template)
+    if cle in cache_templates:
+        return cache_templates[cle]
+
+    tw = TAILLE_BASE
+    th = max(10, int(TAILLE_BASE * template.shape[0] / template.shape[1]))
+
+    # version couleur BGR lissée
+    tmpl_bgr = cv2.GaussianBlur(cv2.resize(template, (tw, th)), (5, 5), 0)
+
+    # version contours Sobel
+    sob = gradient_sobel(template)
+    tmpl_sob = cv2.GaussianBlur(cv2.resize(sob, (tw, th)), (5, 5), 0)
+
+    # répartition des couleurs en HSV
+    sig = signature_couleur(template)
+
+    donnees = (tw, th, tmpl_bgr, tmpl_sob, sig)
+    cache_templates[cle] = donnees
+    return donnees
+
+
+def correlation_multiechelle(roi, template):
     """
-    matchTemplate qui "glisse" le template dans un roi un peu plus grand
-    (25 % de plus). Comme ça on tolère une zone sélectionnée un peu décalée.
-    Retourne la meilleure corrélation entre 0 et 1.
+    Fait glisser le template dans le roi (ou l'inverse) à plusieurs échelles.
+    Comme le rectangle sélectionné a souvent un peu de marge ou est mal centré,
+    tester plusieurs échelles (de 70% à 130%) permet de trouver la vraie correspondance.
+    On compare les couleurs (BGR) et la forme des contours (Sobel).
     """
-    echelle = TAILLE_GLISSANT / max(template.shape[:2])
-    tw = int(template.shape[1] * echelle)
-    th = int(template.shape[0] * echelle)
+    tw, th, tmpl_bgr, tmpl_sob, _ = preparer_template(template)
 
-    tmpl_petit = cv2.GaussianBlur(cv2.resize(template, (tw, th)), (5, 5), 0)
-    roi_grand = cv2.GaussianBlur(cv2.resize(roi, (int(tw * 1.25), int(th * 1.25))), (5, 5), 0)
+    meilleur_bgr = 0.0
+    meilleur_sob = 0.0
 
-    resultat = cv2.matchTemplate(roi_grand, tmpl_petit, cv2.TM_CCOEFF_NORMED)
-    # max(0, ...) car la corrélation peut être négative
-    return max(0.0, float(np.max(resultat)))
+    # on balaie de 70% à 130% de la taille pour absorber les erreurs de cadrage
+    for echelle in [0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30]:
+        rw = max(10, int(tw * echelle))
+        rh = max(10, int(th * echelle))
+
+        roi_bgr = cv2.GaussianBlur(cv2.resize(roi, (rw, rh)), (5, 5), 0)
+        roi_sob_brut = gradient_sobel(roi)
+        roi_sob = cv2.GaussianBlur(cv2.resize(roi_sob_brut, (rw, rh)), (5, 5), 0)
+
+        # si le roi est plus grand, on fait glisser le template dedans
+        if rw >= tw and rh >= th:
+            res_b = cv2.matchTemplate(roi_bgr, tmpl_bgr, cv2.TM_CCOEFF_NORMED)
+            res_s = cv2.matchTemplate(roi_sob, tmpl_sob, cv2.TM_CCOEFF_NORMED)
+        # si le template est plus grand, on fait glisser le roi dedans
+        elif tw >= rw and th >= rh:
+            res_b = cv2.matchTemplate(tmpl_bgr, roi_bgr, cv2.TM_CCOEFF_NORMED)
+            res_s = cv2.matchTemplate(tmpl_sob, roi_sob, cv2.TM_CCOEFF_NORMED)
+        else:
+            # cas mixte : on force la même taille directe
+            r_b = cv2.resize(roi_bgr, (tw, th))
+            r_s = cv2.resize(roi_sob, (tw, th))
+            res_b = cv2.matchTemplate(r_b, tmpl_bgr, cv2.TM_CCOEFF_NORMED)
+            res_s = cv2.matchTemplate(r_s, tmpl_sob, cv2.TM_CCOEFF_NORMED)
+
+        meilleur_bgr = max(meilleur_bgr, float(np.max(res_b)))
+        meilleur_sob = max(meilleur_sob, float(np.max(res_s)))
+
+    return max(0.0, meilleur_bgr), max(0.0, meilleur_sob)
 
 
 def calculer_similarite(roi, template):
     """
-    Score entre 0 et 1 : à quel point le roi ressemble au template.
-    Deux sources de preuves, on garde la meilleure :
-
-    1) Score ORB (panneaux avec du texte ou des détails : Stop, Do Not Enter...)
-       = nombre de matchs géométriquement cohérents.
-    2) Score visuel (panneaux simples : Yield, Work...)
-       = composition des couleurs x corrélation du template glissant.
-       Seulement pour les templates colorés : pour un panneau noir et blanc
-       la couleur ne donne aucune information (tous les panneaux noir et
-       blanc se ressemblent).
-
-    Deux garde-fous pour éviter de prendre un panneau inconnu pour un template :
-    - si les couleurs vives du template ne sont pas dans le roi,
-      on divise le score ORB par 2
-    - si les proportions (largeur / hauteur) sont très différentes, on divise
-      le score final par 2 (zone mal découpée ou panneau coupé par le bord)
+    Score final entre 0 et 1 : à quel point le roi ressemble au template.
+    1. On vérifie les proportions (largeur / hauteur).
+    2. On vérifie la compatibilité des couleurs vives en HSV.
+    3. On combine 70% de contours (Sobel) et 30% d'apparence couleur (BGR).
     """
-    # --- couleurs : est-ce qu'on retrouve les couleurs vives du template dans le roi ? ---
-    # (0 à 1) : un template rouge avec un roi sans rouge donne 0.
-    # On ignore le noir et le blanc : ils sont dans presque tous les panneaux.
+    # 1. proportions
+    ratio_roi = roi.shape[1] / max(1, roi.shape[0])
+    ratio_tmpl = template.shape[1] / max(1, template.shape[0])
+    ecart_ratio = abs(np.log(ratio_roi / ratio_tmpl))
+
+    # 2. couleurs en HSV
     sig_roi = signature_couleur(roi)
-    sig_tmpl = signature_couleur(template)
-    template_colore = sig_tmpl[:5].sum() >= 0.2
-    if template_colore:
-        ressemblance_couleur = float(np.minimum(sig_roi[:5], sig_tmpl[:5]).sum() / sig_tmpl[:5].sum())
+    _, _, _, _, sig_tmpl = preparer_template(template)
+
+    vives_tmpl = float(sig_tmpl[:5].sum())
+    if vives_tmpl >= 0.15:
+        # panneau coloré : les couleurs du template doivent être présentes dans le roi
+        communes = float(np.minimum(sig_roi[:5], sig_tmpl[:5]).sum())
+        ressemblance_couleur = communes / vives_tmpl
     else:
-        ressemblance_couleur = 1.0
+        # panneau noir et blanc (40, do not pass, keep right) :
+        # si le roi est très coloré (ex: rouge vif), ce n'est pas un panneau noir et blanc
+        vives_roi = float(sig_roi[:5].sum())
+        if vives_roi > 0.35:
+            ressemblance_couleur = 0.1
+        else:
+            ressemblance_couleur = 1.0
 
-    # --- 1) score ORB ---
-    nb_matchs = compter_matchs_orb(roi, template)
-    score_orb = float(np.clip((nb_matchs - 3) / 12, 0, 1))
-    if ressemblance_couleur < 0.4:
-        score_orb *= 0.5
+    # 3. corrélation multi-échelle (Sobel + BGR)
+    corr_bgr, corr_sob = correlation_multiechelle(roi, template)
 
-    # --- 2) score visuel (seulement si le template a des couleurs) ---
-    score_visuel = 0.0
-    if template_colore:
-        corr = correlation_glissante(roi, template)
-        score_visuel = ressemblance_couleur * float(np.clip((corr - 0.15) / 0.45, 0, 1))
+    # les arêtes de Sobel sont plus fiables (70%), la couleur confirme (30%)
+    score_corr = 0.70 * corr_sob + 0.30 * corr_bgr
 
-    score = max(score_orb, score_visuel)
+    score = score_corr * ressemblance_couleur
 
-    # --- proportions ---
-    ratio_roi = roi.shape[1] / roi.shape[0]
-    ratio_tmpl = template.shape[1] / template.shape[0]
-    if abs(np.log(ratio_roi / ratio_tmpl)) > 0.45:
-        score *= 0.5
+    # pénalité si les proportions largeur/hauteur sont trop éloignées
+    score *= float(np.exp(-3.0 * (ecart_ratio ** 2)))
 
-    return score
+    return float(np.clip(score, 0.0, 1.0))
 
 
 def trouver_meilleur_match(roi, templates):
     """
-    Teste le roi contre tous les templates.
-    Si le meilleur score est en dessous du seuil, retourne None.
+    Compare le roi à tous les templates et retourne le meilleur match.
+    Si le score reste sous le seuil, retourne None (panneau inconnu ou faux positif).
     """
     meilleur_nom = None
-    meilleur_score = -1
+    meilleur_score = -1.0
 
     for nom, template in templates.items():
         score = calculer_similarite(roi, template)

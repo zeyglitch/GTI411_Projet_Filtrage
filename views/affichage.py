@@ -8,12 +8,8 @@ _derniere_teinte = random.randint(0, 179)
 
 
 def generer_couleur():
-    """
-    Couleur BGR aléatoire, vive et claire pour bien se voir sur l'image
-    et sur le fond noir des étiquettes.
-    La teinte est tirée au hasard mais toujours éloignée de la précédente
-    (sinon on pourrait avoir 3 panneaux de suite en orange).
-    """
+    # couleur aléatoire mais pas trop proche de la précédente
+    # pour qu'on distingue bien deux panneaux côte à côte
     global _derniere_teinte
     _derniere_teinte = (_derniere_teinte + random.randint(30, 60)) % 180
 
@@ -37,15 +33,8 @@ def _se_chevauchent(a, b):
 
 
 def dessiner_etiquette(image, rect, texte, couleur, zones_occupees, autres_cadres=()):
-    """
-    Dessine le texte (fond noir) près du rectangle rect = (x, y, w, h).
-    - l'étiquette reste toujours dans l'image (jamais coupée par le bord)
-    - elle ne se pose ni sur une autre étiquette (zones_occupees), ni sur
-      un autre cadre (autres_cadres) : on essaie des places de plus en plus
-      loin au-dessus et en dessous du cadre
-    - si elle est loin de son cadre, un petit trait les relie
-    On ajoute la nouvelle étiquette à zones_occupees.
-    """
+    # place l'étiquette le plus près possible du cadre sans déborder ni se superposer
+    # à d'autres étiquettes ou cadres ; un petit trait relie si c'est loin
     hauteur_img, largeur_img = image.shape[:2]
     x, y, w, h = rect
 
@@ -99,11 +88,7 @@ def dessiner_etiquette(image, rect, texte, couleur, zones_occupees, autres_cadre
 
 
 def dessiner_resultats(image, resultats):
-    """
-    Dessine tous les cadres puis toutes les étiquettes.
-    resultats = liste de (rect, texte, couleur), rect = (x, y, w, h) en pixels de l'image.
-    On dessine d'abord les cadres pour que les étiquettes les évitent.
-    """
+    # d'abord les cadres, ensuite les étiquettes pour qu'elles évitent les cadres
     echelle = taille_texte(image.shape[1], image.shape[0])
     epaisseur = 2 if echelle < 0.7 else 3
 
