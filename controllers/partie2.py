@@ -31,8 +31,7 @@ class DetectionAuto:
             masque = nettoyer_masque(masque)
             boites += extraire_boites(masque)
 
-        # 3. une même zone peut ressortir dans 2 masques (ex: bordure rouge
-        #    et intérieur blanc) -> on fusionne les boites qui se superposent
+        # 3. une même zone peut ressortir dans 2 masques -> on fusionne les boites qui se superposent
         boites = fusionner_boites(boites)
 
         # 4. on compare chaque zone aux templates avec l'algo de la partie 1
@@ -41,7 +40,7 @@ class DetectionAuto:
             x, y, w, h = boite
             roi = image[y:y+h, x:x+w]
 
-            # zone floue (voiture, fond hors focus) -> pas un panneau
+            # zone floue -> pas un panneau
             if not est_nette(roi):
                 continue
 
@@ -58,14 +57,11 @@ class DetectionAuto:
             resultats.append((boite, nom, score))
 
         # 5. deux résultats qui se superposent = le même panneau vu deux fois
-        #    (ex: un gros morceau de fond et le vrai panneau dedans).
-        #    On garde celui qui a le meilleur score.
+        #    On garde celui qui a le meilleur score
         resultats = self._garder_meilleurs(resultats)
 
         # 6. si le même template sort plusieurs fois, on garde seulement les
-        #    détections presque aussi bonnes que la meilleure (au moins 50%).
-        #    Comme ça deux vrais panneaux identiques restent, mais les
-        #    fragments d'un autre panneau qui ressemblent un peu sont enlevés.
+        #    détections presque aussi bonnes que la meilleure (au moins 50%)
         meilleur_par_nom = {}
         for rect, nom, score in resultats:
             meilleur_par_nom[nom] = max(score, meilleur_par_nom.get(nom, 0))
