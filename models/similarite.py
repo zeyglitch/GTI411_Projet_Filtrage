@@ -44,8 +44,8 @@ def signature_couleur(image):
 def gradient_sobel(image):
     """
     Calcule l'amplitude du gradient avec le filtre de Sobel.
-    Ça permet de faire ressortir les formes, les flèches,
-    les lettres et les chiffres, peu importe si la photo est sombre ou claire.
+    Ça permet de faire ressortir les formes, les flèches, les lettres
+    et les chiffres, peu importe si la photo est sombre ou claire.
     """
     gris = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gx = cv2.Sobel(gris, cv2.CV_32F, 1, 0, ksize=3)

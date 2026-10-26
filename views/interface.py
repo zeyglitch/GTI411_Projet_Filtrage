@@ -6,8 +6,7 @@ import os
 class InterfacePrincipale:
     """
     Fenêtre principale en tkinter.
-    Permet de choisir l'image et la partie à lancer,
-    au lieu de passer par le terminal.
+    Permet de choisir l'image et la partie à lancer, au lieu de passer par le terminal.
     """
 
     def __init__(self, images_test, callback_partie1, callback_partie2):

@@ -10,8 +10,8 @@ TAILLE_MIN_SELECTION = 15
 class DetectionManuelle:
     """
     Partie 1 : sélection manuelle des panneaux à la souris.
-    On utilise un mouse callback pour gérer le rectangle
-    et la fenêtre (views/fenetre.py) pour l'affichage.
+    On utilise un mouse callback pour gérer le rectangle et la
+    fenêtre (views/fenetre.py) pour l'affichage.
     """
 
     def __init__(self, chargeur):

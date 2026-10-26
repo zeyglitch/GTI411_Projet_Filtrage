@@ -15,8 +15,6 @@ def isoler_regions(image):
     Crée un masque binaire par couleur de panneau.
     Couleurs (rouge, orange, jaune, bleu) avec la teinte HSV,
     et blanc avec un seuillage (faible saturation + forte luminosité).
-    On garde les masques séparés : si on les mélange, deux panneaux
-    de couleurs différentes qui se touchent deviennent un seul gros blob.
     """
     flou = cv2.GaussianBlur(image, (5, 5), 0)
     hsv = cv2.cvtColor(flou, cv2.COLOR_BGR2HSV)
@@ -54,9 +52,8 @@ def nettoyer_masque(masque):
 
 def extraire_boites(masque):
     """
-    findContours sur le masque, puis on garde seulement les contours
-    qui peuvent être un panneau (taille, ratio, remplissage).
-    Retourne une liste de boites (x, y, w, h).
+    findContours sur le masque, puis on garde seulement les contours qui peuvent être
+    un panneau (taille, ratio, remplissage). Retourne une liste de boites (x, y, w, h).
     """
     contours, _ = cv2.findContours(masque, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     aire_image = masque.shape[0] * masque.shape[1]
@@ -95,11 +92,9 @@ def intersection(a, b):
 def fusionner_boites(boites, seuil=0.5, ecart_taille_max=3):
     """
     Enlève les doublons : si deux boites se chevauchent beaucoup
-    (intersection / aire de la plus petite > seuil), on les fusionne
-    en une seule boite qui contient les deux.
-    On fusionne seulement des boites de taille comparable (ex: la bordure
-    rouge et l'intérieur blanc d'un même panneau). Sinon une grande tache
-    claire du fond qui contient un panneau l'avalerait en entier.
+    (intersection / aire de la plus petite > seuil), on les fusionne en une
+    seule boite qui contient les deux. On fusionne seulement des boites de
+    taille comparable (ex: la bordure rouge et l'intérieur blanc d'un même panneau).
     On répète tant qu'il reste des fusions possibles.
     """
     boites = list(boites)
@@ -133,10 +128,9 @@ def fusionner_boites(boites, seuil=0.5, ecart_taille_max=3):
 
 def est_nette(roi):
     """
-    Un panneau a des bords nets, alors qu'un objet flou (voiture, fond
-    hors focus) n'en a presque pas. On mesure la variance du Laplacien
-    sur la zone mise à 100x100 pour que la mesure ne dépende pas
-    de la taille de la boite.
+    Un panneau a des bords nets, alors qu'un objet flou (voiture, fond hors focus)
+    n'en a presque pas. On mesure la variance du Laplacien sur la zone mise
+    à 100x100 pour que la mesure ne dépende pas de la taille de la boite.
     """
     gris = cv2.cvtColor(cv2.resize(roi, (100, 100)), cv2.COLOR_BGR2GRAY)
     return cv2.Laplacian(gris, cv2.CV_64F).var() >= NETTETE_MIN
