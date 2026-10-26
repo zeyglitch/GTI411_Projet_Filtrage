@@ -1,60 +1,36 @@
-# GTI411 - Laboratoire 2 : Imagerie Numerique et Filtrage
+# GTI411 - Lab 2 : Filtrage
 
-## Description du projet
+Détection de panneaux de signalisation avec du traitement d'image classique (OpenCV), sans deep learning.
 
-Ce projet s'inscrit dans le cadre du cours GTI411. L'objectif principal est de developper un systeme capable de detecter et d'identifier des panneaux de signalisation routiere dans des images complexes.
+- **Partie 1** : on dessine un rectangle à la souris autour d'un panneau, le programme dit quel template ressemble le plus (ou « Inconnu »).
+- **Partie 2** : le programme trouve les panneaux tout seul (masques HSV, morphologie, contours) puis réutilise la comparaison de la partie 1.
 
-Conformement aux exigences du laboratoire, aucune methode basee sur l'apprentissage profond (Deep Learning, YOLO, etc.) n'est utilisee. La detection repose exclusivement sur des algorithmes de vision par ordinateur classiques offerts par la bibliotheque OpenCV.
+## Organisation (MVC)
 
-Le projet est divise en deux parties :
+- `models/`
+  - `chargeur_images.py` : chargement des templates et des images de test
+  - `similarite.py` : comparaison zone / template (Sobel, couleurs HSV, matchTemplate à plusieurs échelles)
+  - `detection_zones.py` : masques de couleur, morphologie, boîtes englobantes, fusion, netteté (Laplacien)
+- `views/`
+  - `interface.py` : fenêtre Tkinter pour choisir l'image et la partie
+  - `fenetre.py` : fenêtre OpenCV redimensionnable (souris, plein écran)
+  - `affichage.py` : dessin des cadres et des étiquettes
+- `controllers/`
+  - `partie1.py` : sélection manuelle
+  - `partie2.py` : détection automatique
 
-- **Partie 1** : Detection manuelle. L'utilisateur selectionne une region d'interet (ROI) sur l'image et le programme identifie le panneau present dans cette zone.
-- **Partie 2** : Detection automatique. Le programme scanne l'image entiere et identifie tous les panneaux de maniere autonome.
+## Installation
 
-## Architecture
+```bash
+python -m venv .venv
+.venv\Scripts\activate        # Windows
+pip install -r requirements.txt
+```
 
-Afin de maintenir un code propre, lisible et facile a maintenir, le projet respecte le patron d'architecture MVC (Modele-Vue-Controleur) :
-
-- **models/** : Contient la logique d'acces aux donnees et de traitement.
-  - `chargeur_images.py` : Gestion du chargement des images de test et des templates de reference.
-  - `similarite.py` : Algorithme de reconnaissance de panneaux basé sur le filtrage spatial (amplitude du gradient de Sobel), l'analyse des couleurs en espace HSV, et le template matching multi-échelle (corrélation normalisée).
-- **views/** : Gere l'interface utilisateur.
-  - `interface.py` : Interface graphique principale developpee avec Tkinter.
-  - `affichage.py` : Fonctions utilitaires pour le rendu visuel avec OpenCV (dessin de boites englobantes, texte).
-- **controllers/** : Orchestre la communication entre les vues et les modeles.
-  - `partie1.py` : Logique de la selection manuelle et du traitement des evenements de la souris.
-  - `partie2.py` : Logique d'analyse globale de l'image pour la detection automatique.
-
-## Pre-requis et Installation
-
-Assurez-vous d'avoir Python installe sur votre machine. Il est recommande d'utiliser un environnement virtuel.
-
-1. Creation et activation de l'environnement virtuel :
-   Pour Windows :
-
-   ```bash
-   python -m venv .venv
-   .\.venv\Scripts\activate
-   ```
-
-   Pour Linux/MacOS :
-
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
-
-2. Installation des dependances :
-   ```bash
-   pip install opencv-python numpy
-   ```
-
-## Execution
-
-Pour lancer l'application, executez simplement le point d'entree a la racine du projet :
+## Lancer
 
 ```bash
 python main.py
 ```
 
-Une fenetre graphique s'ouvrira, vous permettant de choisir une image de test et de selectionner le mode de detection (Partie 1 ou Partie 2).
+Dans la fenêtre de l'image : Echap pour quitter, F pour le plein écran, C pour effacer les cadres.

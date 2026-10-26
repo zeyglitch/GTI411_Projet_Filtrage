@@ -1,5 +1,4 @@
 import cv2
-import numpy as np
 
 
 # --- paramètres (tout est en proportion de l'image, rien n'est fixé en pixels) ---
@@ -136,8 +135,8 @@ def est_nette(roi):
     """
     Un panneau a des bords nets, alors qu'un objet flou (voiture, fond
     hors focus) n'en a presque pas. On mesure la variance du Laplacien
-    (filtre passe-haut vu en cours) sur la zone mise à 100x100 pour que
-    la mesure ne dépende pas de la taille de la boite.
+    sur la zone mise à 100x100 pour que la mesure ne dépende pas
+    de la taille de la boite.
     """
     gris = cv2.cvtColor(cv2.resize(roi, (100, 100)), cv2.COLOR_BGR2GRAY)
     return cv2.Laplacian(gris, cv2.CV_64F).var() >= NETTETE_MIN

@@ -1,102 +1,53 @@
 import cv2
-import numpy as np
 import random
 
 
-# dernière teinte utilisée : sert à ce que deux couleurs de suite soient bien différentes
-_derniere_teinte = random.randint(0, 179)
-
-
 def generer_couleur():
-    # couleur aléatoire mais pas trop proche de la précédente
-    # pour qu'on distingue bien deux panneaux côte à côte
-    global _derniere_teinte
-    _derniere_teinte = (_derniere_teinte + random.randint(30, 60)) % 180
-
-    hsv = np.uint8([[[_derniere_teinte, 200, 255]]])
-    b, g, r = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0][0]
-    return (int(b), int(g), int(r))
+    # couleur aléatoire assez vive pour bien se voir sur la photo
+    return (random.randint(0, 255), random.randint(100, 255), random.randint(100, 255))
 
 
 def taille_texte(largeur, hauteur):
-    """
-    Taille de la police selon la taille de la fenêtre :
-    ni trop petit quand la fenêtre est petite, ni énorme en plein écran.
-    """
+    """Taille de la police selon la taille de la fenêtre (pas trop petit, pas énorme)."""
     return max(0.45, min(0.8, min(largeur, hauteur) / 1400))
 
 
-def _se_chevauchent(a, b):
-    """True si les rectangles a et b = (x, y, w, h) se touchent."""
-    return not (a[0] + a[2] <= b[0] or b[0] + b[2] <= a[0] or
-                a[1] + a[3] <= b[1] or b[1] + b[3] <= a[1])
+def se_chevauchent(a, b):
+    """True si les rectangles a et b = (x1, y1, x2, y2) se touchent."""
+    return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
 
 
-def dessiner_etiquette(image, rect, texte, couleur, zones_occupees, autres_cadres=()):
-    # place l'étiquette le plus près possible du cadre sans déborder ni se superposer
-    # à d'autres étiquettes ou cadres ; un petit trait relie si c'est loin
+def dessiner_etiquette(image, rect, texte, couleur, etiquettes):
+    """
+    Écrit le texte au-dessus du cadre, sur un fond noir pour qu'il soit lisible.
+    Si ça chevauche une étiquette déjà dessinée (panneaux proches), on le met en dessous.
+    """
     hauteur_img, largeur_img = image.shape[:2]
     x, y, w, h = rect
 
     echelle = taille_texte(largeur_img, hauteur_img)
     epaisseur = 1 if echelle < 0.7 else 2
     (tw, th), base = cv2.getTextSize(texte, cv2.FONT_HERSHEY_SIMPLEX, echelle, epaisseur)
-    marge = 4
-    lb = tw + 2 * marge         # largeur de l'étiquette
-    hb = th + base + 2 * marge  # hauteur de l'étiquette
 
-    # places essayées de la plus proche à la plus loin :
-    # au-dessus (gauche puis droite) et en dessous (gauche puis droite)
-    candidats = []
-    for rang in range(5):
-        candidats.append((x, y - hb * (rang + 1)))
-        candidats.append((x + w - lb, y - hb * (rang + 1)))
-        candidats.append((x, y + h + hb * rang))
-        candidats.append((x + w - lb, y + h + hb * rang))
-    # en dernier recours : dans le cadre
-    candidats.append((x, y))
-    candidats.append((x, y + h - hb))
+    tx = max(0, min(x, largeur_img - tw - 8))
+    ty = y - base - 4                     # au-dessus
+    zone = (tx, ty - th - 4, tx + tw + 8, ty + base)
+    if ty - th - 4 < 0 or any(se_chevauchent(zone, e) for e in etiquettes):
+        ty = min(y + h + th + 6, hauteur_img - base)   # en dessous
+        zone = (tx, ty - th - 4, tx + tw + 8, ty + base)
 
-    obstacles = list(zones_occupees) + list(autres_cadres)
-
-    choix = None
-    for cx, cy in candidats:
-        # on la ramène dans l'image si elle dépasse
-        cx = max(0, min(cx, largeur_img - lb))
-        cy = max(0, min(cy, hauteur_img - hb))
-        if not any(_se_chevauchent((cx, cy, lb, hb), o) for o in obstacles):
-            choix = (cx, cy)
-            break
-
-    if choix is None:
-        # vraiment aucune place : on la met au-dessus tant pis
-        choix = (max(0, min(x, largeur_img - lb)), max(0, min(y - hb, hauteur_img - hb)))
-
-    cx, cy = choix
-
-    # trait entre l'étiquette et son cadre si elle n'est pas collée dessus
-    px = max(x, min(cx + lb // 2, x + w))
-    if cy + hb < y - 2:
-        cv2.line(image, (px, cy + hb), (px, y), couleur, 1)
-    elif cy > y + h + 2:
-        cv2.line(image, (px, cy), (px, y + h), couleur, 1)
-
-    cv2.rectangle(image, (cx, cy), (cx + lb, cy + hb), (0, 0, 0), -1)
-    cv2.putText(image, texte, (cx + marge, cy + marge + th),
-                cv2.FONT_HERSHEY_SIMPLEX, echelle, couleur, epaisseur)
-    zones_occupees.append((cx, cy, lb, hb))
+    cv2.rectangle(image, zone[:2], zone[2:], (0, 0, 0), -1)
+    cv2.putText(image, texte, (tx + 4, ty), cv2.FONT_HERSHEY_SIMPLEX, echelle, couleur, epaisseur)
+    etiquettes.append(zone)
 
 
 def dessiner_resultats(image, resultats):
-    # d'abord les cadres, ensuite les étiquettes pour qu'elles évitent les cadres
+    """Dessine chaque (rect, texte, couleur) : le cadre puis son étiquette."""
     echelle = taille_texte(image.shape[1], image.shape[0])
     epaisseur = 2 if echelle < 0.7 else 3
 
+    etiquettes = []
     for (x, y, w, h), texte, couleur in resultats:
         cv2.rectangle(image, (x, y), (x + w, y + h), couleur, epaisseur)
-
-    zones_occupees = []
-    for i, (rect, texte, couleur) in enumerate(resultats):
-        autres = [r[0] for j, r in enumerate(resultats) if j != i]
-        dessiner_etiquette(image, rect, texte, couleur, zones_occupees, autres)
+        dessiner_etiquette(image, (x, y, w, h), texte, couleur, etiquettes)
     return image

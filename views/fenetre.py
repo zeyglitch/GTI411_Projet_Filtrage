@@ -3,39 +3,32 @@ import numpy as np
 from views.affichage import generer_couleur, dessiner_resultats
 
 
-FOND = (40, 40, 40)   # couleur des bandes autour de l'image
-
-
 class FenetreImage:
     """
     Fenêtre OpenCV qui affiche une image et ses annotations.
-    On redimensionne proprement (garde les proportions),
-    on convertit les coords souris en pixels réels de l'image.
+    L'image est redimensionnée à la taille de la fenêtre en gardant ses proportions,
+    et les coordonnées de la souris sont reconverties en pixels de l'image.
     F = plein écran, C = effacer les cadres.
     """
 
-    def __init__(self, titre, image, callback_souris=None, largeur_max=1280, hauteur_max=800):
+    def __init__(self, titre, image, callback_souris=None):
         self.titre = titre
         self.image = image
         self.callback_souris = callback_souris
         self.annotations = []    # liste de (rect, texte, couleur) en pixels de l'image
         self.plein_ecran = False
 
-        # taille de départ : l'image réduite pour rentrer à l'écran (jamais agrandie)
+        # taille de départ : l'image réduite pour rentrer dans un écran de 1280x800
         h, w = image.shape[:2]
-        ratio = min(1.0, largeur_max / w, hauteur_max / h)
-        self.taille = (max(200, int(w * ratio)), max(200, int(h * ratio)))
+        ratio = min(1.0, 1280 / w, 800 / h)
+        self.taille = (int(w * ratio), int(h * ratio))
 
-        # position de l'image dans la fenêtre au dernier affichage
+        # échelle et décalage de l'image dans la fenêtre (pour convertir les clics)
         self.echelle = ratio
         self.decalage = (0, 0)
-        self._cache = None
-
-    # ---------- ouverture / fermeture ----------
 
     def ouvrir(self):
-        # FREERATIO : la fenêtre ne force pas le ratio de l'image (c'est notre
-        # canvas qui gère les proportions), sinon la taille lue se dérègle
+        # WINDOW_NORMAL pour pouvoir redimensionner la fenêtre à la main
         cv2.namedWindow(self.titre, cv2.WINDOW_NORMAL | cv2.WINDOW_FREERATIO)
         cv2.resizeWindow(self.titre, self.taille[0], self.taille[1])
         cv2.setMouseCallback(self.titre, self._souris)
@@ -50,89 +43,59 @@ class FenetreImage:
     def fermer(self):
         cv2.destroyWindow(self.titre)
 
-    # ---------- annotations ----------
-
     def ajouter_annotation(self, rect, texte, couleur=None):
         if couleur is None:
             couleur = generer_couleur()
         self.annotations.append((rect, texte, couleur))
 
-    def effacer_annotations(self):
-        self.annotations = []
-
-    # ---------- dessin ----------
-
-    def _taille_fenetre(self):
-        """Taille actuelle de la zone d'affichage (si on ne peut pas la lire, la dernière connue)."""
+    def afficher(self, rect_en_cours=None):
+        """Affiche l'image. rect_en_cours = (x, y, w, h) du rectangle qu'on est en train de tirer."""
         try:
-            _, _, w, h = cv2.getWindowImageRect(self.titre)
-        except cv2.error:
-            return self.taille
-        # fenêtre réduite dans la barre des tâches -> w et h valent 0
-        if w < 50 or h < 50:
-            return self.taille
-        self.taille = (w, h)
-        return self.taille
+            _, _, largeur, hauteur = cv2.getWindowImageRect(self.titre)
+        except cv2.error:   # fenêtre déjà fermée
+            largeur, hauteur = self.taille
+        if largeur < 50 or hauteur < 50:   # fenêtre réduite : on garde l'ancienne taille
+            largeur, hauteur = self.taille
+        self.taille = (largeur, hauteur)
 
-    def construire(self, largeur, hauteur):
-        # fond sombre + image centrée à la bonne taille + annotations par-dessus
+        # image centrée dans la fenêtre, bandes grises autour
         ih, iw = self.image.shape[:2]
         echelle = min(largeur / iw, hauteur / ih)
-        nw = max(1, int(iw * echelle))
-        nh = max(1, int(ih * echelle))
-        ox = (largeur - nw) // 2
-        oy = (hauteur - nh) // 2
-
-        # INTER_AREA est meilleur quand on rétrécit, LINEAR quand on agrandit
-        methode = cv2.INTER_AREA if echelle < 1 else cv2.INTER_LINEAR
-        fond = np.full((hauteur, largeur, 3), FOND, np.uint8)
-        fond[oy:oy + nh, ox:ox + nw] = cv2.resize(self.image, (nw, nh), interpolation=methode)
-
+        nw, nh = int(iw * echelle), int(ih * echelle)
+        ox, oy = (largeur - nw) // 2, (hauteur - nh) // 2
         self.echelle = echelle
         self.decalage = (ox, oy)
 
-        # les annotations sont dessinées après le redimensionnement (texte net)
+        ecran = np.full((hauteur, largeur, 3), 40, np.uint8)
+        ecran[oy:oy + nh, ox:ox + nw] = cv2.resize(self.image, (nw, nh))
+
+        # les cadres sont dessinés après le resize pour que le texte reste net
         a_dessiner = []
         for (x, y, w, h), texte, couleur in self.annotations:
-            rect_ecran = (int(x * echelle) + ox, int(y * echelle) + oy,
-                          int(w * echelle), int(h * echelle))
-            a_dessiner.append((rect_ecran, texte, couleur))
-        dessiner_resultats(fond, a_dessiner)
-        return fond
+            rect = (int(x * echelle) + ox, int(y * echelle) + oy, int(w * echelle), int(h * echelle))
+            a_dessiner.append((rect, texte, couleur))
+        dessiner_resultats(ecran, a_dessiner)
 
-    def afficher(self, rect_en_cours=None):
-        """Affiche l'image. rect_en_cours = (x, y, w, h) du rectangle qu'on est en train de tirer."""
-        largeur, hauteur = self._taille_fenetre()
-
-        # on ne recalcule que si la fenêtre ou les annotations ont changé
-        cle = (largeur, hauteur, len(self.annotations))
-        if self._cache is None or self._cache[0] != cle:
-            self._cache = (cle, self.construire(largeur, hauteur))
-
-        ecran = self._cache[1].copy()
+        # rectangle vert pendant qu'on dessine à la souris
         if rect_en_cours is not None:
             x, y, w, h = rect_en_cours
-            ox, oy = self.decalage
-            p1 = (int(x * self.echelle) + ox, int(y * self.echelle) + oy)
-            p2 = (int((x + w) * self.echelle) + ox, int((y + h) * self.echelle) + oy)
+            p1 = (int(x * echelle) + ox, int(y * echelle) + oy)
+            p2 = (int((x + w) * echelle) + ox, int((y + h) * echelle) + oy)
             cv2.rectangle(ecran, p1, p2, (0, 255, 0), 2)
 
         cv2.imshow(self.titre, ecran)
 
-    # ---------- souris et clavier ----------
-
-    def ecran_vers_image(self, x, y):
-        """Convertit un point de la fenêtre en pixel de l'image (limité à l'image)."""
+    def _souris(self, evenement, x, y, flags, param):
+        if self.callback_souris is None:
+            return
+        # point de la fenêtre -> pixel de l'image d'origine (limité à l'image)
         ih, iw = self.image.shape[:2]
         ox, oy = self.decalage
         px = int((x - ox) / self.echelle)
         py = int((y - oy) / self.echelle)
-        return max(0, min(px, iw - 1)), max(0, min(py, ih - 1))
-
-    def _souris(self, evenement, x, y, flags, param):
-        if self.callback_souris is not None:
-            px, py = self.ecran_vers_image(x, y)
-            self.callback_souris(evenement, px, py)
+        px = max(0, min(px, iw - 1))
+        py = max(0, min(py, ih - 1))
+        self.callback_souris(evenement, px, py)
 
     def lire_touche(self):
         """Attend 30 ms une touche. Gère F (plein écran) et C (effacer). Retourne la touche."""
@@ -143,6 +106,6 @@ class FenetreImage:
             mode = cv2.WINDOW_FULLSCREEN if self.plein_ecran else cv2.WINDOW_NORMAL
             cv2.setWindowProperty(self.titre, cv2.WND_PROP_FULLSCREEN, mode)
         elif touche in (ord('c'), ord('C')):
-            self.effacer_annotations()
+            self.annotations = []
 
         return touche
