@@ -48,6 +48,12 @@ class FenetreImage:
             couleur = generer_couleur()
         self.annotations.append((rect, texte, couleur))
 
+    def changer_image(self, nouvelle_image, annotations=None):
+        """Permet de changer dynamiquement l'image et les annotations."""
+        self.image = nouvelle_image
+        if annotations is not None:
+            self.annotations = list(annotations)
+
     def afficher(self, rect_en_cours=None):
         """Affiche l'image. rect_en_cours = (x, y, w, h) du rectangle qu'on est en train de tirer."""
         try:

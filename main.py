@@ -33,7 +33,7 @@ def main():
             detecteur = DetectionManuelle(chargeur)
             detecteur.lancer()
 
-    def lancer_partie2(selection):
+    def lancer_partie2(selection, mode_demo=False):
         """Callback quand on clique sur Partie 2 dans l'interface."""
         if os.path.isabs(selection):
             chargeur.charger_image_chemin(selection)
@@ -42,7 +42,7 @@ def main():
 
         if chargeur.image_courante is not None:
             detecteur = DetectionAuto(chargeur)
-            detecteur.lancer()
+            detecteur.lancer(mode_demo=mode_demo)
 
     # on lance l'interface tkinter
     interface = InterfacePrincipale(images_test, lancer_partie1, lancer_partie2)

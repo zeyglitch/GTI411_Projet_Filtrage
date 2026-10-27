@@ -18,7 +18,7 @@ class InterfacePrincipale:
         # fenêtre principale
         self.root = tk.Tk()
         self.root.title("GTI411 - Lab 2 : Filtrage")
-        self.root.geometry("420x280")
+        self.root.geometry("420x310")
         self.root.resizable(False, False)
 
         self._creer_widgets()
@@ -46,9 +46,15 @@ class InterfacePrincipale:
                                    command=self._parcourir)
         btn_parcourir.pack(side="right")
 
+        # case à cocher mode démo (étapes intermédiaires)
+        self.var_demo = tk.BooleanVar(value=True)
+        chk_demo = ttk.Checkbutton(self.root, text="Mode démo (afficher la mosaïque des étapes)",
+                                   variable=self.var_demo)
+        chk_demo.pack(pady=(8, 0))
+
         # boutons des deux parties
         frame_parties = ttk.Frame(self.root)
-        frame_parties.pack(pady=20)
+        frame_parties.pack(pady=15)
 
         btn_p1 = ttk.Button(frame_parties, text="Partie 1 - Manuelle",
                             command=self._lancer_p1, width=22)
@@ -101,7 +107,7 @@ class InterfacePrincipale:
         selection = self._get_selection()
         if selection:
             self.root.withdraw()
-            self.callback_partie2(selection)
+            self.callback_partie2(selection, self.var_demo.get())
             self.root.deiconify()
 
     def lancer(self):
